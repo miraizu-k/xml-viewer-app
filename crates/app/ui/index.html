@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>XML Viewer</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="app">
+
+  <div class="toolbar" role="toolbar" aria-label="操作">
+    <button type="button" class="tool" id="btn-open" title="ファイルを開く（Ctrl+O）">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.5 4.5v8h13v-6.5h-6l-1.5-1.5z"/></svg>
+      開く <kbd>Ctrl+O</kbd>
+    </button>
+    <button type="button" class="tool" id="btn-print" title="表示中のページを印刷（Ctrl+P）" disabled>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M4.5 5V1.5h7V5M4.5 11.5h-3V5h13v6.5h-3M4.5 9.5h7v5h-7z"/></svg>
+      印刷 <kbd>Ctrl+P</kbd>
+    </button>
+    <span class="spacer"></span>
+    <button type="button" class="tool" id="btn-settings">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12"/><circle cx="5.5" cy="4.5" r="1.6" fill="#fff"/><circle cx="10.5" cy="8" r="1.6" fill="#fff"/><circle cx="6.5" cy="11.5" r="1.6" fill="#fff"/></svg>
+      設定
+    </button>
+  </div>
+
+  <div class="body">
+
+    <!-- 何も開いていないとき -->
+    <div class="empty" id="empty" hidden>
+      <div>
+        <h1>zip か XML を<br>ここにドロップ</h1>
+        <p>中の表示できるページを一覧にします。フォルダや、複数のファイルも置けます。</p>
+        <button type="button" class="primary" id="btn-open-2">ファイルを開く</button>
+      </div>
+      <div class="recent" id="recent-block">
+        <h2>最近開いたファイル</h2>
+        <ul id="recent"></ul>
+        <p class="recent-none" id="recent-none" hidden>まだありません。</p>
+        <button type="button" class="link-btn" id="btn-clear">履歴を消す</button>
+      </div>
+    </div>
+
+    <!-- 開いているとき -->
+    <nav class="list" id="list" aria-label="開いているファイル" hidden></nav>
+    <main class="view" id="view" hidden>
+      <div class="frame-host" id="frame-host"></div>
+      <div class="message" id="message" hidden></div>
+    </main>
+
+  </div>
+
+  <!-- ドラッグ中 -->
+  <div class="drop" id="drop" hidden>
+    <div>
+      <strong>ここに置くと開きます</strong>
+      <span>zip、XML、フォルダ。複数でもまとめて開きます</span>
+    </div>
+  </div>
+
+  <!-- 通知 -->
+  <div class="toast" id="toast" role="status" hidden>
+    <p id="toast-text"></p>
+    <button type="button" class="icon-btn" id="toast-close" aria-label="通知を閉じる">
+      <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" fill="none" stroke-width="1.3"/></svg>
+    </button>
+  </div>
+
+  <!-- 設定 -->
+  <div class="scrim" id="settings" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <h2 id="settings-title">エクスプローラーから開く</h2>
+      <p>どれも今のユーザーだけの設定です。管理者権限は要りません。切ると登録を消します。</p>
+
+      <div class="moved" id="moved" hidden>
+        <p>登録されている場所が、今の exe の場所と違います。</p>
+        <button type="button" class="secondary" id="btn-repair">登録し直す</button>
+      </div>
+
+      <div class="setting">
+        <div>
+          <strong id="label-sendTo">「送る」に追加</strong>
+          <span>右クリックの「送る」から開けます。複数のファイルを選ぶと、1 つのウィンドウにまとめて開きます。</span>
+        </div>
+        <button type="button" class="switch" role="switch" aria-checked="false" data-key="sendTo" aria-labelledby="label-sendTo"></button>
+      </div>
+      <div class="setting">
+        <div>
+          <strong id="label-contextMenu">右クリックメニューに追加</strong>
+          <span>zip と XML の右クリックに「XML Viewer で開く」を足します。Windows 11 では「その他のオプションを確認」の中に出ます。</span>
+        </div>
+        <button type="button" class="switch" role="switch" aria-checked="false" data-key="contextMenu" aria-labelledby="label-contextMenu"></button>
+      </div>
+      <div class="setting">
+        <div>
+          <strong id="label-openWith">「プログラムから開く」の候補に登録</strong>
+          <span>XML と zip の「プログラムから開く」の一覧に、このアプリを出します。</span>
+        </div>
+        <button type="button" class="switch" role="switch" aria-checked="false" data-key="openWith" aria-labelledby="label-openWith"></button>
+      </div>
+
+      <div class="howto">
+        <strong>XML をダブルクリックで開くには</strong>
+        <ol>
+          <li>上の「プログラムから開く」の候補に登録する</li>
+          <li>XML を右クリックして「プログラムから開く」→「別のプログラムを選択」</li>
+          <li>XML Viewer を選んで「常に使う」</li>
+        </ol>
+      </div>
+
+      <div class="dialog-foot">
+        <button type="button" class="primary" id="settings-close">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

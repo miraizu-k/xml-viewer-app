@@ -1,0 +1,2 @@
+# Windows の CI でも LF のまま取り出す（テストのダミーデータを書き換えないため）。
+* text=auto eol=lf

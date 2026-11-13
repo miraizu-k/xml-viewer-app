@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="kagami.xsl"?>
+<!-- テスト用の架空の鑑文書。実在の機関・人物とは関係ない。 -->
+<DOC VERSION="1.0">
+	<BODY ID="DOCBODY">
+		<DOCNO>202601010000000001</DOCNO>
+		<DATE>令和08年01月05日</DATE>
+		<TO>
+			<AFF><![CDATA[サンプル商事株式会社]]></AFF>
+			<NAME><![CDATA[年金　太郎]]></NAME>
+			<HONORIFC>様</HONORIFC>
+		</TO>
+		<AUTHOR>
+			<AFF>架空機構</AFF>
+		</AUTHOR>
+		<TITLE>架空機構からのお知らせ</TITLE>
+		<MAINTXT>
+			<P>電子申請された申請について、審査の結果をお知らせします。<BR/>添付のファイルを参照してください。</P>
+		</MAINTXT>
+		<APPENDIX>
+			<APPTITLE>返戻票</APPTITLE>
+			<DOCLINK REF="henrei.xml"/>
+		</APPENDIX>
+		<APPENDIX>
+			<APPTITLE>通知書（PDF）</APPTITLE>
+			<DOCLINK REF="tsuchisho.pdf"/>
+		</APPENDIX>
+		<MAINTXT3>
+			<P>詳細は <a href="https://www.example.jp/info.html">https://www.example.jp/info.html</a> をご覧ください。</P>
+		</MAINTXT3>
+	</BODY>
+</DOC>
