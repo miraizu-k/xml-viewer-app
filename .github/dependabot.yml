@@ -1,0 +1,25 @@
+# 依存の更新 PR。月に 1 回、Rust のクレートと GitHub Actions をそれぞれ 1 本にまとめる。
+# 脆弱性の修正（セキュリティ更新）は、これとは別に見つかりしだい PR が来る。
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
