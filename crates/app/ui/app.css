@@ -61,6 +61,12 @@ body.busy, body.busy * { cursor: progress !important; }
 .tool svg { width: 16px; height: 16px; flex: none; }
 .tool kbd { font: inherit; font-size: 12px; color: var(--ink-2); }
 .tool:disabled kbd { color: inherit; }
+.tool.icon-only { padding: 0 8px; }
+
+/* 文書の拡大・縮小。印刷との間に区切りを入れる。 */
+.zoom { display: inline-flex; align-items: center; margin-left: 6px; }
+.zoom::before { content: ""; width: 1px; height: 20px; margin-right: 6px; background: var(--line); }
+.tool.zoom-level { justify-content: center; min-width: 56px; padding: 0 6px; font-variant-numeric: tabular-nums; }
 
 .body { display: flex; flex: 1; min-height: 0; }
 

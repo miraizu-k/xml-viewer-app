@@ -17,6 +17,10 @@ const state = {
   blobUrl: null,
   /** ページ表示の通し番号。古い応答を捨てるために使う。 */
   showSeq: 0,
+  /** 文書を表示しているか。印刷と拡大・縮小は、このときだけ使える。 */
+  documentShown: false,
+  /** 文書の拡大率（%）。起動時に保存したものを読む。 */
+  zoom: 100,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -96,7 +100,7 @@ function showEmpty() {
   $('list').hidden = true;
   $('view').hidden = true;
   document.title = 'XML Viewer';
-  $('btn-print').disabled = true;
+  setDocumentControls(false);
   renderRecent();
 }
 
@@ -128,7 +132,14 @@ function showMessage(title, lines, details) {
   }
   $('message').append(box);
   $('message').hidden = false;
-  $('btn-print').disabled = true;
+  setDocumentControls(false);
+}
+
+/** 印刷と拡大・縮小は、文書を表示しているときだけ押せるようにする。 */
+function setDocumentControls(shown) {
+  state.documentShown = shown;
+  $('btn-print').disabled = !shown;
+  updateZoomControls();
 }
 
 // ---- 開く ----
@@ -335,10 +346,10 @@ async function showPage(sourceId, pageIndex) {
   $('frame-host').replaceChildren(frame);
   if (state.blobUrl) URL.revokeObjectURL(state.blobUrl);
   state.blobUrl = url;
-  $('btn-print').disabled = false;
+  setDocumentControls(true);
 }
 
-/** 表示した文書に、折り返しの指定と、リンク・キー操作の処理を付ける。 */
+/** 表示した文書に、折り返しの指定と拡大率、リンク・キー・ホイールの処理を付ける。 */
 function wireDocument(frame, sourceId, pageIndex) {
   let doc;
   try {
@@ -351,10 +362,12 @@ function wireDocument(frame, sourceId, pageIndex) {
   const style = doc.createElement('style');
   style.textContent = 'pre { white-space: pre-wrap !important; }';
   (doc.head || doc.documentElement).append(style);
+  applyZoom(doc);
   doc.addEventListener('click', (ev) => onDocumentClick(ev, doc, sourceId, pageIndex), true);
   doc.addEventListener('auxclick', (ev) => { if (closestLink(ev.target)) ev.preventDefault(); }, true);
   doc.addEventListener('submit', (ev) => ev.preventDefault(), true);
   doc.addEventListener('keydown', onKeyDown, true);
+  doc.addEventListener('wheel', onDocumentWheel, { capture: true, passive: false });
 }
 
 function closestLink(target) {
@@ -392,6 +405,106 @@ function printPage() {
   }
 }
 
+// ---- 文書の拡大・縮小 ----
+//
+// 画面（一覧やツールバー）はそのままで、文書だけを拡大・縮小する。
+// WebView2 標準の拡大（画面全体に効く）は Rust 側で切ってある。
+
+/** 拡大率の段階（%）。Edge と同じ。 */
+const ZOOM_STEPS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300];
+const ZOOM_STORAGE_KEY = 'xmlv.zoom';
+const ZOOM_STYLE_ID = 'xmlv-zoom';
+
+/** 前回の拡大率を読む。読めなければ 100%。 */
+function loadZoom() {
+  try {
+    const value = Number(localStorage.getItem(ZOOM_STORAGE_KEY));
+    if (ZOOM_STEPS.includes(value)) return value;
+  } catch {
+    // 保存先が使えなくても 100% で動く。
+  }
+  return 100;
+}
+
+/** 表示中の文書。無ければ null。 */
+function shownDocument() {
+  const frame = $('frame-host').querySelector('iframe');
+  try {
+    const doc = frame && frame.contentDocument;
+    return doc && doc.documentElement ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 文書に今の拡大率を当てる。画面に出すときだけに効かせ、印刷は 100% のままにする。 */
+function applyZoom(doc) {
+  let style = doc.getElementById(ZOOM_STYLE_ID);
+  if (!style) {
+    style = doc.createElement('style');
+    style.id = ZOOM_STYLE_ID;
+    (doc.head || doc.documentElement).append(style);
+  }
+  style.textContent = state.zoom === 100 ? '' : `@media screen { :root { zoom: ${state.zoom / 100} !important; } }`;
+}
+
+function setZoom(value) {
+  if (!ZOOM_STEPS.includes(value) || value === state.zoom) return;
+  state.zoom = value;
+  try {
+    localStorage.setItem(ZOOM_STORAGE_KEY, String(value));
+  } catch {
+    // 保存できなくても、このウィンドウでは効く。
+  }
+  updateZoomControls();
+  const doc = shownDocument();
+  if (!doc) return;
+  // 拡大・縮小の前後で、見ていた位置（全体に対する割合）を保つ。
+  const root = doc.scrollingElement || doc.documentElement;
+  const ratioY = root.scrollHeight ? root.scrollTop / root.scrollHeight : 0;
+  const ratioX = root.scrollWidth ? root.scrollLeft / root.scrollWidth : 0;
+  applyZoom(doc);
+  root.scrollTop = ratioY * root.scrollHeight;
+  root.scrollLeft = ratioX * root.scrollWidth;
+}
+
+/** 1 段階拡大（direction = 1）または縮小（-1）する。 */
+function zoomStep(direction) {
+  const i = ZOOM_STEPS.indexOf(state.zoom);
+  setZoom(ZOOM_STEPS[Math.min(Math.max(i + direction, 0), ZOOM_STEPS.length - 1)]);
+}
+
+function updateZoomControls() {
+  const shown = state.documentShown;
+  $('zoom-level').textContent = `${state.zoom}%`;
+  $('btn-zoom-out').disabled = !shown || state.zoom === ZOOM_STEPS[0];
+  $('btn-zoom-in').disabled = !shown || state.zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  $('btn-zoom-reset').disabled = !shown;
+}
+
+let wheelDelta = 0;
+
+/** 文書の上での Ctrl + ホイール（タッチパッドのピンチも同じ形で届く）で拡大・縮小する。 */
+function onDocumentWheel(ev) {
+  if (!ev.ctrlKey) return;
+  ev.preventDefault();
+  // マウスのホイールは 1 目盛りで 100 前後、ピンチは小さな値が続けて届くので、溜めてから 1 段階動かす。
+  wheelDelta += ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaY;
+  if (Math.abs(wheelDelta) >= 50) {
+    zoomStep(wheelDelta < 0 ? 1 : -1);
+    wheelDelta = 0;
+  }
+}
+
+/** Ctrl と一緒に押されたキーが拡大（1）・縮小（-1）・100%（0）のどれか。どれでもなければ null。 */
+function zoomKey(ev) {
+  // 日本語キーボードの「;+」キー（Semicolon）と、US キーボードの「=+」キー（Equal）の両方で拡大する。
+  if (ev.code === 'Equal' || ev.code === 'Semicolon' || ev.code === 'NumpadAdd' || ev.key === '+') return 1;
+  if (ev.code === 'Minus' || ev.code === 'NumpadSubtract' || ev.key === '-') return -1;
+  if (ev.code === 'Digit0' || ev.code === 'Numpad0') return 0;
+  return null;
+}
+
 // ---- キー操作 ----
 
 /** 画面と文書の両方に付ける。ウィンドウ全体に効く標準の動き（読み直し・戻る・印刷）を止める。 */
@@ -403,6 +516,14 @@ function onKeyDown(ev) {
     || (ev.altKey && (key === 'ArrowLeft' || key === 'ArrowRight'));
   if (blocked) {
     ev.preventDefault();
+    return;
+  }
+  const zoom = ctrl && !ev.altKey ? zoomKey(ev) : null;
+  if (zoom !== null) {
+    ev.preventDefault();
+    if (!state.documentShown) return;
+    if (zoom === 0) setZoom(100);
+    else zoomStep(zoom);
     return;
   }
   if (ctrl && key === 'p') {
@@ -518,6 +639,11 @@ function wire() {
   $('btn-open').addEventListener('click', pickAndOpen);
   $('btn-open-2').addEventListener('click', pickAndOpen);
   $('btn-print').addEventListener('click', printPage);
+  $('btn-zoom-out').addEventListener('click', () => zoomStep(-1));
+  $('btn-zoom-in').addEventListener('click', () => zoomStep(1));
+  $('btn-zoom-reset').addEventListener('click', () => setZoom(100));
+  state.zoom = loadZoom();
+  updateZoomControls();
   $('btn-settings').addEventListener('click', openSettings);
   $('settings-close').addEventListener('click', closeSettings);
   $('btn-repair').addEventListener('click', repairIntegration);
