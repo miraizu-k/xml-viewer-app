@@ -32,6 +32,13 @@ jobs:
 
       - run: cargo test --workspace --locked
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      # 配布する exe に、about.toml で認めていないライセンスのクレートが入っていないこと。
+      - run: cargo about generate --workspace --locked --fail about.hbs -o /dev/null
+
   windows:
     name: Windows（lint・テスト・exe のビルド）
     runs-on: windows-latest

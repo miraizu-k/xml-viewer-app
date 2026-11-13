@@ -1,0 +1,12 @@
+XML Viewer が使っているサードパーティのソフトウェアと、そのライセンス
+Third-party software used by XML Viewer and their licenses
+
+{{#each licenses}}
+================================================================================
+{{{name}}} ({{{id}}})
+Used by: {{#each used_by}}{{{crate.name}}} {{{crate.version}}}{{#unless @last}}, {{/unless}}{{/each}}
+--------------------------------------------------------------------------------
+
+{{{text}}}
+
+{{/each}}

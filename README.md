@@ -10,6 +10,8 @@ zip をウィンドウにドロップすると、中の表示できるページ�
 - Windows 10 / 11（64 ビット）
 - Microsoft Edge WebView2 ランタイム（Windows 11 と、更新済みの Windows 10 には入っています）
 
+Visual C++ ランタイムは exe に含めているので、別に入れる必要はありません。
+
 exe に署名をしていないので、初めて起動するときに SmartScreen の警告が出ることがあります。
 
 ## 使い方
@@ -30,6 +32,11 @@ cargo build --release -p xml-viewer
 # WSL / Linux から（cargo-xwin を使う）
 cargo xwin build --release --target x86_64-pc-windows-msvc -p xml-viewer
 ```
+
+## ライセンス
+
+[MIT](LICENSE)。exe に含まれるサードパーティのソフトウェアのライセンスは、各リリースの `THIRD-PARTY-LICENSES.txt` にまとめています
+（`cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-LICENSES.txt` で手元でも作れます）。
 
 ## リリース
 
