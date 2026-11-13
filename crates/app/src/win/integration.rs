@@ -243,14 +243,17 @@ fn read_default(path: &str) -> Option<String> {
 fn remove_tree(path: &str) -> Result<(), String> {
     match CURRENT_USER.remove_tree(path) {
         Ok(()) => Ok(()),
-        // 無ければ何もしない。
-        Err(e) if e.code() == windows::Win32::Foundation::ERROR_FILE_NOT_FOUND.to_hresult() => Ok(()),
+        // 無ければ何もしない。windows-registry と windows で windows-result の版が違っても比べられるよう、値で比べる。
+        Err(e) if e.code().0 == windows::Win32::Foundation::ERROR_FILE_NOT_FOUND.to_hresult().0 => Ok(()),
         Err(e) => Err(reg_error(e)),
     }
 }
 
-fn reg_error(e: windows::core::Error) -> String {
-    format!("レジストリに書き込めませんでした（{}）", e.message())
+/// レジストリのエラーを画面に出す文にする。
+///
+/// windows-registry が使う windows-result の版に縛られないよう、表示できるエラーなら何でも受ける。
+fn reg_error(e: impl std::fmt::Display) -> String {
+    format!("レジストリに書き込めませんでした（{e}）")
 }
 
 #[cfg(test)]
