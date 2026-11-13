@@ -1,0 +1,4 @@
+# Visual C++ ランタイムを exe に静的リンクする。
+# しないと VCRUNTIME140.dll が必要になり、ランタイムの入っていない PC で起動できない。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
