@@ -24,7 +24,7 @@ exe に署名をしていないので、初めて起動するときに SmartScre
 - 文書の中のリンクで、ほかのページに移れます。PDF などアプリで表示しないファイルは、既定のアプリで開きます
 - 印刷は Ctrl + P。PDF は印刷ダイアログの「PDF として保存」で作ります
 - 何も開いていないときの画面に、最近開いたファイルが出ます
-- 「設定」から、エクスプローラーの「送る」・右クリックメニュー・「プログラムから開く」に登録できます。今のユーザーだけの設定で、管理者権限は要りません
+- 「設定」から、エクスプローラーの「送る」・右クリックメニュー・「プログラムから開く」に登録できます。今のユーザーだけの設定で、管理者権限は要りません。切ると登録を消します
 
 ## できないこと
 
@@ -40,25 +40,6 @@ exe に署名をしていないので、初めて起動するときに SmartScre
 - zip は一時フォルダ（`%TEMP%\xml-viewer`）に展開し、閉じたときとアプリの終了時に削除します。展開先の外を指すエントリは展開しません
 - 最近開いたファイルとして記録するのはパスと日時だけで、文書の中身は保存しません
 
-## アンインストール
-
-インストーラーはありません。次の順に消します。
-
-1. 「設定」で「送る」「右クリックメニュー」「プログラムから開く」をすべて切る（登録したものが消えます）
-2. exe を削除する
-3. 必要なら、アプリが作ったフォルダを削除する
-   - `%APPDATA%\xml-viewer`（最近開いたファイルの記録）
-   - `%LOCALAPPDATA%\xml-viewer`（WebView2 のデータ）
-   - `%TEMP%\xml-viewer`（展開した zip。通常は終了時に消えます）
-
-先に exe を消した場合、登録は次の場所に残ります（今のユーザーの分だけ）。手で削除できます。
-`xml-viewer.exe` の部分は、exe の名前を変えていればその名前です。
-
-- `HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.zip\shell\XmlViewer.Open`（`.xml` も同じ）
-- `HKEY_CURRENT_USER\Software\Classes\Applications\xml-viewer.exe`
-- `HKEY_CURRENT_USER\Software\Classes\.zip\OpenWithList\xml-viewer.exe`（`.xml` も同じ）
-- 「送る」フォルダ（エクスプローラーのアドレス欄に `shell:sendto`）の `XML Viewer.lnk`
-
 ## 不具合の報告
 
 [Issues](../../issues) で受け付けています。
@@ -68,29 +49,6 @@ Issue は誰でも見られます。再現に文書が必要なときは、個�
 
 脆弱性は公開の Issue ではなく、[SECURITY.md](SECURITY.md) の方法で知らせてください。
 
-## 開発
-
-- `crates/core`: 開く・zip の展開・一覧・変換・リンク・履歴。MSXML を呼ぶ部分（`xslt.rs`）だけが Windows 専用で、それ以外は Linux でもテストできます
-- `crates/app`: exe。`src/api.rs` が画面からの呼び出しを振り分け、`src/win/` がウィンドウ（wry + tao / WebView2）と Windows の機能を受け持ちます。画面は `ui/` の HTML / CSS / JS で、exe に埋め込みます
-- テスト用のデータ（`crates/core/tests/fixtures/`）は、すべて架空のダミーです
-
-```sh
-# Windows 上
-cargo test --workspace
-cargo build --release -p xml-viewer
-
-# WSL / Linux から（cargo-xwin を使う）
-cargo test --workspace   # Windows に依存しない部分だけ
-CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER=env cargo xwin test --target x86_64-pc-windows-msvc --workspace   # WSL から exe を直接起動する
-cargo xwin build --release --target x86_64-pc-windows-msvc -p xml-viewer
-```
-
-`main` への変更は PR で行い、Linux と Windows の CI が通ってからマージします。
-
-リリースは、`Cargo.toml` の `version` を上げる PR をマージしてから、`main` のそのコミットに同じ番号のタグ（例: `v0.2.0`）を付けて push します。
-GitHub Actions が Windows でテストとビルドをして、Releases に exe を載せます。`v*` のタグは、一度 push すると消したり付け替えたりできません。
-
 ## ライセンス
 
-[MIT](LICENSE)。exe に含まれるサードパーティのソフトウェアのライセンスは、各リリースの `THIRD-PARTY-LICENSES.txt` にまとめています
-（`cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-LICENSES.txt` で手元でも作れます）。
+[MIT](LICENSE)。exe に含まれるサードパーティのソフトウェアのライセンスは、各リリースの `THIRD-PARTY-LICENSES.txt` にまとめています。
