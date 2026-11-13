@@ -152,6 +152,8 @@ fn run_inner() -> Result<(), String> {
         .with_new_window_req_handler(|_url, _features| NewWindowResponse::Deny)
         // 標準の右クリックメニュー（「戻る」「更新」「印刷」など、ウィンドウ全体に効く項目）は出さない。
         .with_default_context_menus(false)
+        // 標準の拡大・縮小（Ctrl + ホイールなど）は画面全体に効くので使わない。文書だけを画面側（ui/app.js）で拡大する。
+        .with_hotkeys_zoom(false)
         .with_devtools(cfg!(debug_assertions))
         .with_background_color((255, 255, 255, 255))
         .build(&window)
