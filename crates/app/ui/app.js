@@ -32,12 +32,17 @@ const ICON_WARN = '<svg viewBox="0 0 13 13" fill="none" stroke="currentColor" st
 // ---- Rust 側の呼び出し ----
 
 async function api(command, args = {}) {
-  const res = await fetch('/api/' + command, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Xmlv': '1' },
-    body: JSON.stringify(args),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch('/api/' + command, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Xmlv': '1' },
+      body: JSON.stringify(args),
+    });
+    data = await res.json();
+  } catch {
+    throw new Error('アプリの中の呼び出しに失敗しました');
+  }
   if (!data.ok) {
     const error = new Error(data.error.message);
     error.kind = data.error.kind;
@@ -149,7 +154,16 @@ function setDocumentControls(shown) {
 
 // ---- 開く ----
 
-async function openPaths(paths) {
+/** 開く処理の順番待ち。ドロップや履歴のクリックが重なっても、1 つずつ順に開く。 */
+let openQueue = Promise.resolve();
+
+function openPaths(paths) {
+  const run = openQueue.then(() => openPathsNow(paths));
+  openQueue = run.catch(() => {});
+  return run;
+}
+
+async function openPathsNow(paths) {
   if (!paths || !paths.length) return;
   setBusy(true);
   let results;
@@ -165,6 +179,7 @@ async function openPaths(paths) {
   const failures = [];
   const notes = [];
   let last = null;
+  let lastExisting = false;
   for (const r of results) {
     if (!r.ok) {
       failures.push(`${r.path}（${r.error.message}）`);
@@ -173,13 +188,16 @@ async function openPaths(paths) {
     const s = r.source;
     state.sources = [s, ...state.sources.filter((x) => x.id !== s.id)];
     last = s;
+    lastExisting = r.existing;
     if (s.truncated) notes.push(`${s.name}: ページが多いため、${s.pages.length} 件だけを一覧に出しています。`);
     if (s.skippedEntries) notes.push(`${s.name}: 名前に問題がある ${s.skippedEntries} 件のファイルは展開しませんでした。`);
   }
 
   if (last) {
     showOpened();
-    select(last);
+    // 表示中のものをもう一度開いたときは、見ているページのままにする。
+    if (lastExisting && state.current && state.current.source === last.id) renderList();
+    else select(last);
   } else if (!state.sources.length) {
     showEmpty();
   }
@@ -262,10 +280,22 @@ function renderList() {
   const focused = list.contains(document.activeElement) ? document.activeElement : null;
   const selector = focused ? listButtonSelector(focused) : null;
   list.replaceChildren(...state.sources.map(renderSource));
+  revealCurrent();
   if (!focused) return;
   const target = (selector && list.querySelector(selector)) || list.querySelector('.entry[aria-current="true"]')
     || list.querySelector('button');
   if (target) target.focus({ preventScroll: true });
+}
+
+/** 選んでいるページが一覧の外に隠れていたら、見える位置までスクロールする。 */
+function revealCurrent() {
+  const list = $('list');
+  const item = list.querySelector('.entry[aria-current="true"]');
+  if (!item || list.hidden) return;
+  const box = list.getBoundingClientRect();
+  const rect = item.getBoundingClientRect();
+  if (rect.top < box.top) list.scrollTop -= box.top - rect.top;
+  else if (rect.bottom > box.bottom) list.scrollTop += rect.bottom - box.bottom;
 }
 
 /** 一覧のボタンを、描き直した後に探すためのセレクター。 */
@@ -360,7 +390,11 @@ async function showPage(sourceId, pageIndex) {
     data = await api('page', { source: sourceId, page: pageIndex });
   } catch (e) {
     // 一覧では選んだ状態になっているので、前の文書を出したままにしない。
-    if (seq === state.showSeq) showMessage('このページは表示できません', [e.message]);
+    if (seq === state.showSeq) {
+      const source = state.sources.find((s) => s.id === sourceId);
+      document.title = source ? `${source.name} - XML Viewer` : 'XML Viewer';
+      showMessage('このページは表示できません', [e.message]);
+    }
     return;
   }
   if (seq !== state.showSeq) return;
@@ -369,7 +403,9 @@ async function showPage(sourceId, pageIndex) {
   if (data.error) {
     const e = data.error;
     const position = e.line ? `（${e.line} 行目${e.column ? `、${e.column} 文字目` : ''}）` : '';
-    showMessage('このページは表示できません', ['変換に失敗しました。ほかのページは表示できます。'], [
+    const source = state.sources.find((s) => s.id === sourceId);
+    const others = source && source.pages.some((p, i) => i !== pageIndex && !p.failed);
+    showMessage('このページは表示できません', [others ? '変換に失敗しました。ほかのページは表示できます。' : '変換に失敗しました。'], [
       ['ファイル', e.file ? e.file + position : ''],
       ['理由', e.reason],
     ]);
@@ -425,18 +461,29 @@ async function onDocumentClick(ev, doc, sourceId, pageIndex) {
   if (!link) return;
   ev.preventDefault();
   const href = (link.getAttribute('href') || '').trim();
+  if (!href) return;
   if (href.startsWith('#')) {
-    const id = decodeURIComponent(href.slice(1));
+    let id = href.slice(1);
+    try {
+      id = decodeURIComponent(id);
+    } catch {
+      // 「%」がそのまま入っているなどで読めなければ、書かれたままの名前で探す。
+    }
     const target = id ? doc.getElementById(id) || doc.getElementsByName(id)[0] : doc.body;
     if (target) target.scrollIntoView();
     return;
   }
+  // 応答を待つ間に別のページを選んでいたら、リンク先へは移らない。
+  const seq = state.showSeq;
   try {
     const r = await api('link', { source: sourceId, page: pageIndex, href });
-    if (r.kind === 'page') showPage(sourceId, r.page);
-    else if (r.kind === 'none') toast(`このリンクの行き先は開けません（${href}）`);
+    if (r.kind === 'page') {
+      if (seq === state.showSeq) showPage(sourceId, r.page);
+    } else if (r.kind === 'none') {
+      toast(`このリンクの行き先は開けません（${href}）`);
+    }
   } catch (e) {
-    toast(e.message);
+    toast(`開けませんでした: ${href}（${e.message}）`);
   }
 }
 
@@ -526,6 +573,11 @@ function updateZoomControls() {
   $('btn-zoom-out').disabled = !shown || state.zoom === ZOOM_STEPS[0];
   $('btn-zoom-in').disabled = !shown || state.zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1];
   $('btn-zoom-reset').disabled = !shown;
+  // 押していたボタンが端（50% や 300%）で押せなくなったら、フォーカスを「100%」へ移す（外れて先頭に戻らないように）。
+  const active = document.activeElement;
+  if ((active === $('btn-zoom-in') || active === $('btn-zoom-out')) && active.disabled && shown) {
+    $('btn-zoom-reset').focus();
+  }
 }
 
 let wheelDelta = 0;
@@ -620,10 +672,17 @@ async function renderRecent() {
     li.append(open, time, forget);
     return li;
   });
+  // 履歴の中にフォーカスがあれば、描き直した後も同じ行（消したときは次の行、無ければ「ファイルを開く」）へ移す。
+  const focused = $('recent-block').contains(document.activeElement) ? document.activeElement : null;
+  const row = focused ? [...$('recent').children].indexOf(focused.closest('li')) : -1;
   $('recent').replaceChildren(...rows);
   $('recent').hidden = !items.length;
   $('recent-none').hidden = items.length > 0;
   $('btn-clear').hidden = !items.length;
+  if (focused) {
+    const next = row >= 0 && rows.length ? rows[Math.min(row, rows.length - 1)].querySelector('.open') : null;
+    (next || $('btn-open-2')).focus({ preventScroll: true });
+  }
 }
 
 // ---- 設定 ----
@@ -651,8 +710,11 @@ async function openSettings() {
   $('settings').hidden = false;
   setBackgroundInert(true);
   $('settings-close').focus();
+  // 実際の登録を読み終わるまでは、前回の表示のまま押されないようにする（読めなければ押せないまま）。
+  setIntegrationBusy(true);
   try {
     applyIntegration((await api('integration')).items);
+    setIntegrationBusy(false);
   } catch (e) {
     toast(e.message);
   }
@@ -664,23 +726,39 @@ function closeSettings() {
   $('btn-settings').focus();
 }
 
+/** 押していたスイッチやボタン。押せない間に外れたフォーカスを、押せるようになったら戻す。 */
+let integrationFocus = null;
+
+/** 登録を読み書きしている間は、スイッチと「登録し直す」をまとめて押せないようにする（応答の順序が入れ替わらないように）。 */
+function setIntegrationBusy(on) {
+  const controls = [...document.querySelectorAll('.switch'), $('btn-repair')];
+  if (on) integrationFocus = controls.includes(document.activeElement) ? document.activeElement : null;
+  for (const control of controls) control.disabled = on;
+  if (on || !integrationFocus) return;
+  const lost = !document.activeElement || document.activeElement === document.body;
+  // 「登録し直す」は、うまくいくと消えるので、最初のスイッチへ移す。
+  const target = integrationFocus.closest('[hidden]') ? document.querySelector('.switch') : integrationFocus;
+  integrationFocus = null;
+  if (lost && settingsOpen()) target.focus();
+}
+
 async function toggleIntegration(sw) {
   const enabled = sw.getAttribute('aria-checked') !== 'true';
-  sw.disabled = true;
-  try {
-    applyIntegration((await api('integrationSet', { key: sw.dataset.key, enabled })).items);
-  } catch (e) {
-    toast(e.message);
-  } finally {
-    sw.disabled = false;
-  }
+  await updateIntegration('integrationSet', { key: sw.dataset.key, enabled });
 }
 
 async function repairIntegration() {
+  await updateIntegration('integrationRepair');
+}
+
+async function updateIntegration(command, args) {
+  setIntegrationBusy(true);
   try {
-    applyIntegration((await api('integrationRepair')).items);
+    applyIntegration((await api(command, args)).items);
   } catch (e) {
     toast(e.message);
+  } finally {
+    setIntegrationBusy(false);
   }
 }
 
@@ -722,7 +800,9 @@ function wire() {
     if (target.dataset.close) closeSource(Number(target.dataset.close));
     else if (target.dataset.page !== undefined) showPage(Number(target.dataset.source), Number(target.dataset.page));
     else if (target.dataset.other !== undefined) {
-      api('openOther', { source: Number(target.dataset.source), index: Number(target.dataset.other) }).catch((e) => toast(e.message));
+      const name = target.querySelector('.name').textContent;
+      api('openOther', { source: Number(target.dataset.source), index: Number(target.dataset.other) })
+        .catch((e) => toast(`開けませんでした: ${name}（${e.message}）`));
     }
   });
 
@@ -759,7 +839,7 @@ async function init() {
     toast(e.message);
   }
   if (paths.length) await openPaths(paths);
-  if (!state.sources.length) showEmpty();
+  if (!state.sources.length && $('empty').hidden) showEmpty();
 }
 
 init();

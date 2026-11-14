@@ -142,6 +142,48 @@ fn open_zip_returns_pages_and_others_and_records_history() {
     assert_eq!(again["results"][0]["source"]["id"], source["id"]);
 }
 
+/// 変換に時間がかかる仮の実装。同じパスを並行して開いたときの確認に使う。
+struct SlowTransformer;
+
+impl Transformer for SlowTransformer {
+    fn transform(&self, xml: &Path, xsl: &Path) -> Result<String, TransformError> {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        FakeTransformer.transform(xml, xsl)
+    }
+}
+
+#[test]
+fn opening_same_path_concurrently_keeps_one_source() {
+    let work = Work::new("open-concurrent");
+    let zip = work.0.join("202601010000000001.zip");
+    zip_fixture("egov", "202601010000000001", &zip);
+    let api = Arc::new(Api::new(
+        work.0.join("tmp"),
+        RecentStore::new(work.0.join("recent.json")),
+        Box::new(SlowTransformer),
+        Box::new(FakePlatform::default()),
+        vec![],
+    ));
+
+    let args = json!({ "paths": [zip.to_string_lossy()] });
+    let threads: Vec<_> = (0..2)
+        .map(|_| {
+            let (api, args) = (api.clone(), args.clone());
+            std::thread::spawn(move || call(&api, "open", args))
+        })
+        .collect();
+    let results: Vec<Value> = threads.into_iter().map(|t| t.join().unwrap()["results"][0].clone()).collect();
+
+    // どちらも開けたことになり、同じものを指す。新しく開いたのは 1 つだけ。
+    assert!(results.iter().all(|r| r["ok"] == true));
+    assert_eq!(results[0]["source"]["id"], results[1]["source"]["id"]);
+    assert_eq!(results.iter().filter(|r| r["existing"] == true).count(), 1);
+    // 後から開き終わった方の展開先は、破棄されて残らない。
+    let dirs_in = |dir: PathBuf| fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.is_dir());
+    let extracted: usize = dirs_in(work.0.join("tmp")).map(|session| dirs_in(session).count()).sum();
+    assert_eq!(extracted, 1);
+}
+
 #[test]
 fn open_reports_failures_and_continues() {
     let work = Work::new("fail");
