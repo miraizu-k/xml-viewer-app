@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::fsutil::write_replacing;
 use crate::pathutil::same_path;
 
 /// 記録する件数の上限。
@@ -73,15 +74,9 @@ impl RecentStore {
     }
 
     fn save(&self, items: &[RecentEntry]) -> io::Result<()> {
-        if let Some(dir) = self.file.parent() {
-            fs::create_dir_all(dir)?;
-        }
         let data = RecentFile { version: 1, items: items.to_vec() };
         let json = serde_json::to_vec_pretty(&data).map_err(io::Error::other)?;
-        // 書きかけのファイルを読まれないよう、別名で書いてから置き換える。
-        let tmp = self.file.with_extension(format!("tmp{}", std::process::id()));
-        fs::write(&tmp, json)?;
-        fs::rename(&tmp, &self.file)
+        write_replacing(&self.file, &json)
     }
 }
 

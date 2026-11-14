@@ -28,7 +28,7 @@
       </button>
     </div>
     <span class="spacer"></span>
-    <button type="button" class="tool" id="btn-settings" title="エクスプローラーから開く設定">
+    <button type="button" class="tool" id="btn-settings" title="設定">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12"/><circle cx="5.5" cy="4.5" r="1.6" fill="#fff"/><circle cx="10.5" cy="8" r="1.6" fill="#fff"/><circle cx="6.5" cy="11.5" r="1.6" fill="#fff"/></svg>
       設定
     </button>
@@ -79,7 +79,9 @@
   <!-- 設定 -->
   <div class="scrim" id="settings" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <h2 id="settings-title">エクスプローラーから開く</h2>
+      <h2 id="settings-title">設定</h2>
+
+      <h3>エクスプローラーから開く</h3>
       <p>どれも今のユーザーだけの設定です。管理者権限は要りません。切ると登録を消します。</p>
 
       <div class="moved" id="moved" hidden>
@@ -116,6 +118,15 @@
           <li>XML を右クリックして「プログラムから開く」→「別のプログラムを選択」</li>
           <li>XML Viewer を選んで「常に使う」</li>
         </ol>
+      </div>
+
+      <h3>ウィンドウ</h3>
+      <div class="setting">
+        <div>
+          <strong id="label-singleWindow">ウィンドウを 1 つにまとめる</strong>
+          <span>エクスプローラーや exe へのドロップから開いたときに、新しいウィンドウを出さず、開いているウィンドウで開きます。</span>
+        </div>
+        <button type="button" class="switch" role="switch" aria-checked="false" id="switch-single-window" aria-labelledby="label-singleWindow"></button>
       </div>
 
       <div class="dialog-foot">

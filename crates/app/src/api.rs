@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use xml_viewer_core::history::RecentStore;
 use xml_viewer_core::link::{LinkTarget, resolve_link};
+use xml_viewer_core::settings::{Settings, SettingsStore};
 use xml_viewer_core::source::{self, InputKind, Limits, Source};
 use xml_viewer_core::temp::TempSession;
 use xml_viewer_core::xslt::Transformer;
@@ -47,6 +48,20 @@ pub trait Platform: Send + Sync {
     fn integration_status(&self) -> Result<Vec<IntegrationItem>, String>;
     /// エクスプローラー連携を入れる・外す。
     fn integration_set(&self, key: &str, enabled: bool) -> Result<(), String>;
+    /// 「ウィンドウを 1 つにまとめる」を切り替えた（保存は済んでいる）。
+    /// 入れたときは、ほかにまとめ先のウィンドウが無ければ、このウィンドウが後からの起動を受け付け始める。
+    fn single_window_changed(&self, enabled: bool);
+}
+
+/// ほかの起動から渡されたパスの扱い（[`Api::hand_over`]）。
+#[derive(Debug, PartialEq, Eq)]
+pub enum HandOver {
+    /// 画面がまだ起動引数を受け取っていないので、起動引数に足した。画面が受け取るときに一緒に開く。
+    Queued,
+    /// 画面に知らせて開く。
+    Deliver(Vec<PathBuf>),
+    /// ウィンドウを閉じようとしているので、受け付けない。
+    Closed,
 }
 
 /// 呼び出しの失敗。画面には `{ ok: false, error: { kind, message } }` で返す。
@@ -72,6 +87,7 @@ pub struct Api {
     temp: Mutex<Option<Arc<TempSession>>>,
     temp_root: PathBuf,
     recent: RecentStore,
+    settings: SettingsStore,
     transformer: Box<dyn Transformer + Send>,
     platform: Box<dyn Platform>,
     limits: Limits,
@@ -84,6 +100,8 @@ struct State {
     next_id: u32,
     /// 起動引数で渡されたパス。最初の `startup` で一度だけ返す。
     startup_paths: Option<Vec<PathBuf>>,
+    /// ウィンドウを閉じようとしている（[`Api::shutdown`] の後）。
+    closed: bool,
 }
 
 /// 開いたものを画面に渡す形。
@@ -197,6 +215,12 @@ struct IntegrationArgs {
     enabled: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsArgs {
+    single_window: bool,
+}
+
 fn parse<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, ApiError> {
     let body = if body.is_empty() { b"{}".as_slice() } else { body };
     serde_json::from_slice(body).map_err(|e| ApiError::bad_request(format!("引数が正しくありません（{e}）")))
@@ -210,6 +234,7 @@ impl Api {
     pub fn new(
         temp_root: PathBuf,
         recent: RecentStore,
+        settings: SettingsStore,
         transformer: Box<dyn Transformer + Send>,
         platform: Box<dyn Platform>,
         startup_paths: Vec<PathBuf>,
@@ -219,6 +244,7 @@ impl Api {
             temp: Mutex::new(None),
             temp_root,
             recent,
+            settings,
             transformer,
             platform,
             limits: Limits::default(),
@@ -269,6 +295,14 @@ impl Api {
                 }
                 self.integration_status()
             }
+            "settings" => Ok(json!(self.settings.load())),
+            "settingsSet" => {
+                let args: SettingsArgs = parse(body)?;
+                let settings = Settings { single_window: args.single_window };
+                self.settings.save(settings).map_err(|e| ApiError::new("io", e.to_string()))?;
+                self.platform.single_window_changed(settings.single_window);
+                Ok(json!(settings))
+            }
             _ => Err(ApiError::new("unknown_command", format!("知らないコマンドです: {command}"))),
         }
     }
@@ -276,6 +310,22 @@ impl Api {
     fn startup(&self) -> Value {
         let paths = self.state().startup_paths.take().unwrap_or_default();
         json!({ "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>() })
+    }
+
+    /// ほかの起動から渡されたパスを受け取る（ウィンドウを 1 つにまとめる設定）。
+    /// 画面がまだ `startup` を呼んでいなければ起動引数に足し、呼んだ後なら画面に知らせるよう返す。
+    pub fn hand_over(&self, paths: Vec<PathBuf>) -> HandOver {
+        let mut state = self.state();
+        if state.closed {
+            return HandOver::Closed;
+        }
+        match state.startup_paths.as_mut() {
+            Some(pending) => {
+                pending.extend(paths);
+                HandOver::Queued
+            }
+            None => HandOver::Deliver(paths),
+        }
     }
 
     /// パスを順に開く。開けなかったものは理由を返し、ほかは続ける。
@@ -416,8 +466,13 @@ impl Api {
     }
 
     /// 終了時の後片付け。開いているものと、この起動用の一時フォルダを消す。
+    /// これ以降、ほかの起動から渡されたパスは受け付けない。
     pub fn shutdown(&self) {
-        let sources = std::mem::take(&mut self.state().sources);
+        let sources = {
+            let mut state = self.state();
+            state.closed = true;
+            std::mem::take(&mut state.sources)
+        };
         drop(sources);
         let session = self.temp.lock().unwrap_or_else(|e| e.into_inner()).take();
         drop(session);

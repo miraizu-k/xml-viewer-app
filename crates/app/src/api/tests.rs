@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use xml_viewer_core::history::RecentStore;
+use xml_viewer_core::settings::SettingsStore;
 use xml_viewer_core::xslt::{TransformError, Transformer};
 
 use super::*;
@@ -86,12 +87,16 @@ impl Platform for FakePlatform {
         item.state = if enabled { IntegrationState::On } else { IntegrationState::Off };
         Ok(())
     }
+    fn single_window_changed(&self, enabled: bool) {
+        self.calls.lock().unwrap().push(format!("single:{enabled}"));
+    }
 }
 
 fn api(work: &Work, platform: FakePlatform, startup: Vec<PathBuf>) -> Api {
     Api::new(
         work.0.join("tmp"),
         RecentStore::new(work.0.join("recent.json")),
+        SettingsStore::new(work.0.join("settings.json")),
         Box::new(FakeTransformer),
         Box::new(platform),
         startup,
@@ -108,6 +113,48 @@ fn startup_returns_paths_only_once() {
     let api = api(&work, FakePlatform::default(), vec![PathBuf::from("C:\\a.zip")]);
     assert_eq!(call(&api, "startup", json!({})), json!({ "paths": ["C:\\a.zip"] }));
     assert_eq!(call(&api, "startup", json!({})), json!({ "paths": [] }));
+}
+
+#[test]
+fn hand_over_before_startup_adds_to_startup_paths() {
+    let work = Work::new("handover-early");
+    let api = api(&work, FakePlatform::default(), vec![PathBuf::from("C:\\a.zip")]);
+    assert_eq!(api.hand_over(vec![PathBuf::from("C:\\b.zip"), PathBuf::from("C:\\c.xml")]), HandOver::Queued);
+    assert_eq!(api.hand_over(vec![]), HandOver::Queued);
+    assert_eq!(call(&api, "startup", json!({})), json!({ "paths": ["C:\\a.zip", "C:\\b.zip", "C:\\c.xml"] }));
+}
+
+#[test]
+fn hand_over_after_startup_is_delivered_until_shutdown() {
+    let work = Work::new("handover-late");
+    let api = api(&work, FakePlatform::default(), vec![]);
+    call(&api, "startup", json!({}));
+    assert_eq!(api.hand_over(vec![PathBuf::from("C:\\b.zip")]), HandOver::Deliver(vec![PathBuf::from("C:\\b.zip")]));
+    assert_eq!(call(&api, "startup", json!({})), json!({ "paths": [] }));
+    api.shutdown();
+    assert_eq!(api.hand_over(vec![PathBuf::from("C:\\c.zip")]), HandOver::Closed);
+}
+
+#[test]
+fn hand_over_is_refused_after_shutdown_even_before_startup() {
+    let work = Work::new("handover-closed");
+    let api = api(&work, FakePlatform::default(), vec![]);
+    api.shutdown();
+    assert_eq!(api.hand_over(vec![PathBuf::from("C:\\b.zip")]), HandOver::Closed);
+}
+
+#[test]
+fn settings_are_saved_and_reported_to_platform() {
+    let work = Work::new("settings");
+    let platform = FakePlatform::default();
+    let api = api(&work, platform.clone(), vec![]);
+    assert_eq!(call(&api, "settings", json!({})), json!({ "singleWindow": false }));
+    assert_eq!(call(&api, "settingsSet", json!({ "singleWindow": true })), json!({ "singleWindow": true }));
+    assert_eq!(call(&api, "settings", json!({})), json!({ "singleWindow": true }));
+    assert!(SettingsStore::new(work.0.join("settings.json")).load().single_window);
+    call(&api, "settingsSet", json!({ "singleWindow": false }));
+    assert_eq!(*platform.calls.lock().unwrap(), ["single:true", "single:false"]);
+    assert_eq!(api.handle("settingsSet", b"{}").unwrap_err().kind, "bad_request");
 }
 
 #[test]
@@ -166,6 +213,7 @@ fn opening_page_of_open_source_selects_it() {
     let api = Api::new(
         work.0.join("tmp2"),
         RecentStore::new(work.0.join("recent2.json")),
+        SettingsStore::new(work.0.join("settings2.json")),
         Box::new(FakeTransformer),
         Box::new(FakePlatform::default()),
         vec![],
@@ -199,6 +247,7 @@ fn opening_same_path_concurrently_keeps_one_source() {
     let api = Arc::new(Api::new(
         work.0.join("tmp"),
         RecentStore::new(work.0.join("recent.json")),
+        SettingsStore::new(work.0.join("settings.json")),
         Box::new(SlowTransformer),
         Box::new(FakePlatform::default()),
         vec![],

@@ -267,7 +267,9 @@ body.busy, body.busy * { cursor: progress !important; }
   border-radius: 8px;
   background: var(--paper);
 }
-.dialog h2 { margin: 0 0 2px; font-size: 17px; font-weight: 600; }
+.dialog h2 { margin: 0 0 12px; font-size: 17px; font-weight: 600; }
+.dialog h3 { margin: 20px 0 2px; font-size: 14px; font-weight: 600; }
+.dialog h2 + h3 { margin-top: 0; }
 .dialog > p { margin: 0 0 12px; font-size: 13px; color: var(--ink-2); }
 .setting { display: flex; align-items: flex-start; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
 .setting div { flex: 1; min-width: 0; }

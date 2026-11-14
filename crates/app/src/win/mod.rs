@@ -3,11 +3,13 @@
 //! 画面（`ui/` の HTML / CSS / JS）は exe に埋め込み、独自スキーム `app`（`http://app.localhost/`）で配る。
 //! 画面からの呼び出しは `POST /api/{コマンド}` で受け、別スレッドで [`Api`] に処理させて JSON を返す。
 //! ファイルのドロップなど、Rust 側から画面へ知らせることは `evaluate_script` で伝える。
+//! 「ウィンドウを 1 つにまとめる」設定のときは、ウィンドウを作る前に、動いているウィンドウへパスを渡せるかを試す（[`single_window`]）。
 
 mod com;
 mod dialog;
 mod integration;
 mod shell;
+mod single_window;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -17,16 +19,20 @@ use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::platform::windows::WindowExtWindows;
-use tao::window::WindowBuilder;
+use tao::window::{Window, WindowBuilder};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
 use wry::http::{Method, Request, Response, StatusCode};
 use wry::{
     DragDropEvent, NewWindowResponse, RequestAsyncResponder, WebContext, WebViewBuilder, WebViewBuilderExtWindows,
 };
 use xml_viewer_core::history::RecentStore;
+use xml_viewer_core::settings::SettingsStore;
 use xml_viewer_core::temp::sweep_stale;
 use xml_viewer_core::xslt::Msxml;
 
-use crate::api::{Api, IntegrationItem, Platform};
+use self::single_window::{Listener, Role, Ticket};
+use crate::api::{Api, HandOver, IntegrationItem, Platform};
 
 const APP_URL: &str = "http://app.localhost/";
 
@@ -46,11 +52,18 @@ enum UserEvent {
     Script(String),
     /// ウィンドウのタイトルを変える。
     Title(String),
+    /// ほかの起動から渡されたパスを開いて、ウィンドウを前に出す。開く前に札を確かめる（[`Ticket`]）。
+    Open(Vec<PathBuf>, Ticket),
+    /// ウィンドウを前に出す。
+    Front,
+    /// 「ウィンドウを 1 つにまとめる」が入った。ほかにまとめ先が無ければ、後からの起動を受け付け始める。
+    Listen,
 }
 
 /// 保存先などのパス。
 struct AppPaths {
     recent_file: PathBuf,
+    settings_file: PathBuf,
     webview_data: PathBuf,
     temp_root: PathBuf,
 }
@@ -60,6 +73,7 @@ impl AppPaths {
         let env_dir = |name: &str| std::env::var_os(name).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
         Self {
             recent_file: env_dir("APPDATA").join("xml-viewer").join("recent.json"),
+            settings_file: env_dir("APPDATA").join("xml-viewer").join("settings.json"),
             webview_data: env_dir("LOCALAPPDATA").join("xml-viewer").join("webview"),
             temp_root: std::env::temp_dir().join("xml-viewer"),
         }
@@ -70,6 +84,7 @@ impl AppPaths {
 struct WinPlatform {
     owner: isize,
     integration: integration::Integration,
+    proxy: EventLoopProxy<UserEvent>,
 }
 
 impl Platform for WinPlatform {
@@ -91,6 +106,13 @@ impl Platform for WinPlatform {
 
     fn integration_set(&self, key: &str, enabled: bool) -> Result<(), String> {
         self.integration.set(key, enabled)
+    }
+
+    fn single_window_changed(&self, enabled: bool) {
+        // 切ったときは受け付けをやめない。後から起動したものが設定を見て、つながりに来なくなる。
+        if enabled {
+            let _ = self.proxy.send_event(UserEvent::Listen);
+        }
     }
 }
 
@@ -114,6 +136,21 @@ fn run_inner() -> Result<(), String> {
         .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)))
         .collect();
 
+    // ウィンドウを 1 つにまとめる設定なら、動いているウィンドウにパスを渡して終わる。
+    // 無ければ、このウィンドウがまとめ先になる。
+    let settings = SettingsStore::new(paths.settings_file.clone());
+    let pipe_name = single_window::pipe_name(&paths.settings_file);
+    let mut listener = None;
+    if settings.load().single_window
+        && let Some(name) = &pipe_name
+    {
+        match single_window::start(name, &startup_paths) {
+            Role::HandedOver => return Ok(()),
+            Role::Primary(claimed) => listener = Some(claimed),
+            Role::Alone => {}
+        }
+    }
+
     // 前回までの一時フォルダの残りを消す（ほかのウィンドウが使っているものは残る）。
     let temp_root = paths.temp_root.clone();
     std::thread::spawn(move || sweep_stale(&temp_root));
@@ -126,14 +163,24 @@ fn run_inner() -> Result<(), String> {
         .build(&event_loop)
         .map_err(|e| format!("ウィンドウを作れませんでした（{e}）"))?;
 
-    let platform = WinPlatform { owner: window.hwnd(), integration: integration::Integration::current() };
+    let platform = WinPlatform {
+        owner: window.hwnd(),
+        integration: integration::Integration::current(),
+        proxy: event_loop.create_proxy(),
+    };
     let api = Arc::new(Api::new(
         paths.temp_root.clone(),
         RecentStore::new(paths.recent_file.clone()),
+        settings,
         Box::new(Msxml),
         Box::new(platform),
         startup_paths,
     ));
+    // 画面ができるより前に届いたパスは、起動引数に足しておく（画面が最初に受け取る）。
+    let mut listening = listener.is_some();
+    if let Some(listener) = listener {
+        listen(listener, api.clone(), event_loop.create_proxy());
+    }
 
     let mut web_context = WebContext::new(Some(paths.webview_data.clone()));
     let protocol_api = api.clone();
@@ -161,8 +208,14 @@ fn run_inner() -> Result<(), String> {
         .with_devtools(cfg!(debug_assertions))
         .with_background_color((255, 255, 255, 255))
         .build(&window)
-        .map_err(|e| format!("WebView2 を初期化できませんでした（{e}）"))?;
+        .map_err(|e| {
+            // まとめ先として受け付けていたら、これ以降は断る（後からの起動が自分のウィンドウで開く）。
+            api.shutdown();
+            format!("WebView2 を初期化できませんでした（{e}）")
+        })?;
 
+    let listen_proxy = event_loop.create_proxy();
+    let mut closing = false;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -172,7 +225,29 @@ fn run_inner() -> Result<(), String> {
             Event::UserEvent(UserEvent::Title(title)) => {
                 window.set_title(if title.is_empty() { "XML Viewer" } else { &title });
             }
+            // 閉じようとしているとき、または受け付けの側がもう断った（送った側が自分で開いた）ときは、開かない。
+            Event::UserEvent(UserEvent::Open(paths, ticket)) => {
+                if !closing && ticket.take() {
+                    if !paths.is_empty() {
+                        let list: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                        let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+                        let _ = webview.evaluate_script(&format!("window.__xmlv && window.__xmlv.open({json})"));
+                    }
+                    bring_to_front(&window);
+                }
+            }
+            Event::UserEvent(UserEvent::Front) => bring_to_front(&window),
+            Event::UserEvent(UserEvent::Listen) => {
+                if !listening
+                    && let Some(name) = &pipe_name
+                    && let Ok(Some(listener)) = Listener::claim(name)
+                {
+                    listen(listener, api.clone(), listen_proxy.clone());
+                    listening = true;
+                }
+            }
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                closing = true;
                 api.shutdown();
                 *control_flow = ControlFlow::Exit;
             }
@@ -182,6 +257,32 @@ fn run_inner() -> Result<(), String> {
         // web_context は WebView より長く生きている必要があるので、ループに持たせておく。
         let _ = &web_context;
     });
+}
+
+/// 後からの起動を受け付ける。渡されたパスは、画面がまだ起動引数を受け取っていなければ起動引数に足し、
+/// 受け取った後なら画面に開かせる。閉じようとしているとき、画面が時間内に引き受けないときは断る。
+fn listen(listener: Listener, api: Arc<Api>, proxy: EventLoopProxy<UserEvent>) {
+    listener.serve(move |paths| match api.hand_over(paths) {
+        HandOver::Queued => {
+            let _ = proxy.send_event(UserEvent::Front);
+            true
+        }
+        HandOver::Deliver(paths) => {
+            let ticket = Ticket::new();
+            proxy.send_event(UserEvent::Open(paths, ticket.clone())).is_ok() && ticket.wait()
+        }
+        HandOver::Closed => false,
+    });
+}
+
+/// ウィンドウを前に出す。最小化していれば元に戻す（前に出す権利は、渡してきた起動から受け取っている）。
+fn bring_to_front(window: &Window) {
+    if window.is_minimized() {
+        window.set_minimized(false);
+    }
+    unsafe {
+        let _ = SetForegroundWindow(HWND(window.hwnd() as *mut _));
+    }
 }
 
 /// ファイルのドラッグを画面に知らせる。
