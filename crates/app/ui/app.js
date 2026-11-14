@@ -1,7 +1,7 @@
 // xml-viewer の画面の動き。
 //
 // - Rust 側へは `POST /api/{コマンド}` で呼び出す（api 関数）
-// - Rust 側からは window.__xmlv の関数が呼ばれる（ファイルのドラッグ）
+// - Rust 側からは window.__xmlv の関数が呼ばれる（ファイルのドラッグ、ほかの起動から渡されたパス）
 // - 文書は Blob URL にして、スクリプトを止めた iframe に表示する
 //   （repos/docs/story/00-overview.md の D2）。文書の中のリンクは、ここで拾って処理する（D6）
 // - 文書のタイトルやファイル名は外から来た値なので、HTML として組み立てず textContent で入れる
@@ -731,10 +731,15 @@ function setBackgroundInert(on) {
   for (const node of document.querySelectorAll('.toolbar, .body')) node.inert = on;
 }
 
-async function openSettings() {
+function openSettings() {
   $('settings').hidden = false;
   setBackgroundInert(true);
   $('settings-close').focus();
+  loadIntegration();
+  loadSettings();
+}
+
+async function loadIntegration() {
   // 実際の登録を読み終わるまでは、前回の表示のまま押されないようにする（読めなければ押せないまま）。
   setIntegrationBusy(true);
   try {
@@ -756,13 +761,13 @@ let integrationFocus = null;
 
 /** 登録を読み書きしている間は、スイッチと「登録し直す」をまとめて押せないようにする（応答の順序が入れ替わらないように）。 */
 function setIntegrationBusy(on) {
-  const controls = [...document.querySelectorAll('.switch'), $('btn-repair')];
+  const controls = [...document.querySelectorAll('.switch[data-key]'), $('btn-repair')];
   if (on) integrationFocus = controls.includes(document.activeElement) ? document.activeElement : null;
   for (const control of controls) control.disabled = on;
   if (on || !integrationFocus) return;
   const lost = !document.activeElement || document.activeElement === document.body;
   // 「登録し直す」は、うまくいくと消えるので、最初のスイッチへ移す。
-  const target = integrationFocus.closest('[hidden]') ? document.querySelector('.switch') : integrationFocus;
+  const target = integrationFocus.closest('[hidden]') ? document.querySelector('.switch[data-key]') : integrationFocus;
   integrationFocus = null;
   if (lost && settingsOpen()) target.focus();
 }
@@ -787,6 +792,37 @@ async function updateIntegration(command, args) {
   }
 }
 
+function applySettings(settings) {
+  $('switch-single-window').setAttribute('aria-checked', String(settings.singleWindow));
+}
+
+/** 保存してある設定を読む。読み終わるまでは押せないようにする（読めなければ押せないまま）。 */
+async function loadSettings() {
+  const sw = $('switch-single-window');
+  sw.disabled = true;
+  try {
+    applySettings(await api('settings'));
+    sw.disabled = false;
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+/** 「ウィンドウを 1 つにまとめる」を切り替える。保存し終わるまでは押せないようにし、外れたフォーカスは戻す。 */
+async function toggleSingleWindow(sw) {
+  const singleWindow = sw.getAttribute('aria-checked') !== 'true';
+  sw.disabled = true;
+  try {
+    applySettings(await api('settingsSet', { singleWindow }));
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    sw.disabled = false;
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (lost && settingsOpen()) sw.focus();
+  }
+}
+
 // ---- Rust 側から呼ばれる関数 ----
 
 window.__xmlv = {
@@ -797,6 +833,11 @@ window.__xmlv = {
   /** ファイルが置かれた。 */
   drop(paths) {
     $('drop').hidden = true;
+    if (settingsOpen()) closeSettings();
+    openPaths(paths);
+  },
+  /** ほかの起動（エクスプローラーから開いたときなど）から、パスが渡された（ウィンドウを 1 つにまとめる設定）。 */
+  open(paths) {
     if (settingsOpen()) closeSettings();
     openPaths(paths);
   },
@@ -858,7 +899,9 @@ function wire() {
       return;
     }
     const sw = ev.target.closest('.switch');
-    if (sw && !sw.disabled) toggleIntegration(sw);
+    if (!sw || sw.disabled) return;
+    if (sw.dataset.key) toggleIntegration(sw);
+    else if (sw.id === 'switch-single-window') toggleSingleWindow(sw);
   });
 }
 
