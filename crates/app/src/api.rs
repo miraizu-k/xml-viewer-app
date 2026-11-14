@@ -286,18 +286,23 @@ impl Api {
 
     fn open_one(&self, path: &Path) -> Value {
         let path_text = path.to_string_lossy();
+        // 開いているもののうち、このパスを開いたものか、このパスをページに含むもの
+        // （同じフォルダの XML を「送る」で複数選んだときなど）。まとまりは増やさない。
+        // 一緒に返すのは、このパスが指すページ（XML を開いたときだけ）。
         let existing = |state: &State| {
-            state
-                .sources
-                .iter()
-                .find(|(_, s)| xml_viewer_core::same_path(&s.input, path))
-                .map(|(id, s)| SourceView::new(*id, s))
+            state.sources.iter().find_map(|(id, s)| {
+                let page = if xml_viewer_core::same_path(&s.input, path) {
+                    if s.kind == InputKind::Xml { s.initial_page } else { None }
+                } else {
+                    Some(s.pages.iter().position(|p| xml_viewer_core::same_path(&p.xml, path))?)
+                };
+                Some((SourceView::new(*id, s), page))
+            })
         };
-        // すでに開いているパスなら、選択を移すだけにする。
         let found = existing(&self.state());
-        if let Some(view) = found {
+        if let Some((view, page)) = found {
             let _ = self.recent.add(path, now_secs());
-            return json!({ "path": path_text, "ok": true, "existing": true, "source": view });
+            return json!({ "path": path_text, "ok": true, "existing": true, "page": page, "source": view });
         }
 
         let temp = || -> std::io::Result<PathBuf> { self.temp_session()?.new_extract_dir() };
@@ -306,11 +311,11 @@ impl Api {
                 let _ = self.recent.add(path, now_secs());
                 let mut state = self.state();
                 // 同じパスを並行して開いていて（ダブルクリックなど）、先に開き終わった方があれば、そちらを使う。
-                if let Some(view) = existing(&state) {
+                if let Some((view, page)) = existing(&state) {
                     drop(state);
                     // 一時フォルダの削除はロックの外で行う（Source を破棄すると消える）。
                     drop(source);
-                    return json!({ "path": path_text, "ok": true, "existing": true, "source": view });
+                    return json!({ "path": path_text, "ok": true, "existing": true, "page": page, "source": view });
                 }
                 let id = state.next_id;
                 state.next_id += 1;

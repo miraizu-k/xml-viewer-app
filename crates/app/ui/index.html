@@ -28,7 +28,7 @@
       </button>
     </div>
     <span class="spacer"></span>
-    <button type="button" class="tool" id="btn-settings">
+    <button type="button" class="tool" id="btn-settings" title="エクスプローラーから開く設定">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12"/><circle cx="5.5" cy="4.5" r="1.6" fill="#fff"/><circle cx="10.5" cy="8" r="1.6" fill="#fff"/><circle cx="6.5" cy="11.5" r="1.6" fill="#fff"/></svg>
       設定
     </button>
@@ -47,7 +47,7 @@
         <h2>最近開いたファイル</h2>
         <ul id="recent"></ul>
         <p class="recent-none" id="recent-none" hidden>まだありません。</p>
-        <button type="button" class="link-btn" id="btn-clear" hidden>履歴を消す</button>
+        <button type="button" class="link-btn" id="btn-clear" hidden>履歴をすべて消す</button>
       </div>
     </div>
 
@@ -104,7 +104,7 @@
       <div class="setting">
         <div>
           <strong id="label-openWith">「プログラムから開く」の候補に登録</strong>
-          <span>XML と zip の「プログラムから開く」の一覧に、このアプリを出します。</span>
+          <span>zip と XML の「プログラムから開く」の一覧に、このアプリを出します。</span>
         </div>
         <button type="button" class="switch" role="switch" aria-checked="false" data-key="openWith" aria-labelledby="label-openWith"></button>
       </div>
