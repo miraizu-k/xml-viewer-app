@@ -2783,7 +2783,7 @@ dependencies = [
 
 [[package]]
 name = "xml-viewer"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "embed-manifest",
  "serde",
@@ -2798,7 +2798,7 @@ dependencies = [
 
 [[package]]
 name = "xml-viewer-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "encoding_rs",
  "quick-xml",
