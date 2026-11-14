@@ -21,6 +21,8 @@ const state = {
   documentShown: false,
   /** 文書の拡大率（%）。起動時に保存したものを読む。 */
   zoom: 100,
+  /** まとまりごとに最後に表示したページ（source id → page）。選び直したときに戻す。 */
+  lastPages: new Map(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -179,25 +181,28 @@ async function openPathsNow(paths) {
   const failures = [];
   const notes = [];
   let last = null;
-  let lastExisting = false;
+  let lastPage;
   for (const r of results) {
     if (!r.ok) {
       failures.push(`${r.path}（${r.error.message}）`);
       continue;
     }
     const s = r.source;
-    state.sources = [s, ...state.sources.filter((x) => x.id !== s.id)];
+    // 新しく開いたものは一覧の上に足す。開いているものは並びを変えない。
+    if (!state.sources.some((x) => x.id === s.id)) state.sources = [s, ...state.sources];
     last = s;
-    lastExisting = r.existing;
+    // 開いているまとまりの中の XML を開いたときは、そのページを出す。ほかは最後に見ていたページへ戻す。
+    lastPage = r.existing && r.page != null ? r.page : undefined;
     if (s.truncated) notes.push(`${s.name}: ページが多いため、${s.pages.length} 件だけを一覧に出しています。`);
     if (s.skippedEntries) notes.push(`${s.name}: 名前に問題がある ${s.skippedEntries} 件のファイルは展開しませんでした。`);
   }
 
   if (last) {
     showOpened();
-    // 表示中のものをもう一度開いたときは、見ているページのままにする。
-    if (lastExisting && state.current && state.current.source === last.id) renderList();
-    else select(last);
+    const page = lastPage !== undefined ? lastPage : pageToShow(last);
+    // 表示中のページをもう一度開いたときは、読み直さない。
+    if (state.current && state.current.source === last.id && state.current.page === page) renderList();
+    else select(last, page);
   } else if (!state.sources.length) {
     showEmpty();
   }
@@ -225,9 +230,13 @@ async function pickAndOpen() {
   await openPaths(paths);
 }
 
-/** 開いたものを選ぶ。最初に出すページがあれば表示する。 */
-function select(source) {
-  const page = source.initialPage ?? null;
+/** まとまりを選んだときに出すページ。最後に見ていたページ、無ければ最初に出すページ。 */
+function pageToShow(source) {
+  return state.lastPages.get(source.id) ?? source.initialPage ?? null;
+}
+
+/** 開いたものを選ぶ。出すページ（省略したら pageToShow）があれば表示する。 */
+function select(source, page = pageToShow(source)) {
   if (page !== null) {
     showPage(source.id, page);
     return;
@@ -254,6 +263,7 @@ async function closeSource(id) {
     toast(e.message);
   }
   state.sources = state.sources.filter((s) => s.id !== id);
+  state.lastPages.delete(id);
   if (state.current && state.current.source === id) {
     clearView();
     if (state.sources.length) {
@@ -380,9 +390,11 @@ function renderPageEntry(s, p) {
 
 // ---- 表示 ----
 
-async function showPage(sourceId, pageIndex) {
+/** ページを表示する。fragment（リンクの「#」の後ろ）があれば、その位置までスクロールする。 */
+async function showPage(sourceId, pageIndex, fragment = '') {
   const seq = ++state.showSeq;
   state.current = { source: sourceId, page: pageIndex };
+  state.lastPages.set(sourceId, pageIndex);
   showOpened();
   renderList();
   let data;
@@ -421,6 +433,7 @@ async function showPage(sourceId, pageIndex) {
   const frameFocused = document.activeElement && document.activeElement.tagName === 'IFRAME';
   frame.addEventListener('load', () => {
     wireDocument(frame, sourceId, pageIndex);
+    if (fragment && frame.contentDocument) scrollToFragment(frame.contentDocument, fragment);
     if (frameFocused && seq === state.showSeq) frame.contentWindow.focus();
   });
   frame.src = url;
@@ -460,17 +473,14 @@ async function onDocumentClick(ev, doc, sourceId, pageIndex) {
   const link = closestLink(ev.target);
   if (!link) return;
   ev.preventDefault();
+  // ダブルクリックの 2 回目では開かない（同じファイルやページが 2 回開かないように）。
+  if (ev.detail > 1) return;
   const href = (link.getAttribute('href') || '').trim();
   if (!href) return;
-  if (href.startsWith('#')) {
-    let id = href.slice(1);
-    try {
-      id = decodeURIComponent(id);
-    } catch {
-      // 「%」がそのまま入っているなどで読めなければ、書かれたままの名前で探す。
-    }
-    const target = id ? doc.getElementById(id) || doc.getElementsByName(id)[0] : doc.body;
-    if (target) target.scrollIntoView();
+  const hash = href.indexOf('#');
+  const fragment = hash >= 0 ? href.slice(hash + 1) : '';
+  if (hash === 0) {
+    scrollToFragment(doc, fragment);
     return;
   }
   // 応答を待つ間に別のページを選んでいたら、リンク先へは移らない。
@@ -478,13 +488,28 @@ async function onDocumentClick(ev, doc, sourceId, pageIndex) {
   try {
     const r = await api('link', { source: sourceId, page: pageIndex, href });
     if (r.kind === 'page') {
-      if (seq === state.showSeq) showPage(sourceId, r.page);
+      if (seq !== state.showSeq) return;
+      // 同じページへのリンクは、読み直さずにその位置（無ければ先頭）までスクロールする。
+      if (r.page === pageIndex) scrollToFragment(doc, fragment);
+      else showPage(sourceId, r.page, fragment);
     } else if (r.kind === 'none') {
       toast(`このリンクの行き先は開けません（${href}）`);
     }
   } catch (e) {
     toast(`開けませんでした: ${href}（${e.message}）`);
   }
+}
+
+/** 文書の中の、名前（id か name）が fragment の要素までスクロールする。fragment が空なら先頭へ。 */
+function scrollToFragment(doc, fragment) {
+  let id = fragment;
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    // 「%」がそのまま入っているなどで読めなければ、書かれたままの名前で探す。
+  }
+  const target = id ? doc.getElementById(id) || doc.getElementsByName(id)[0] : doc.body || doc.documentElement;
+  if (target) target.scrollIntoView();
 }
 
 function printPage() {
@@ -794,9 +819,10 @@ function wire() {
   $('toast-close').addEventListener('click', hideToast);
   document.addEventListener('keydown', onKeyDown, true);
 
+  // ダブルクリックの 2 回目は無視する（2 回開いたり、描き直した後の隣のボタンを押したりしないように）。
   $('list').addEventListener('click', (ev) => {
     const target = ev.target.closest('button');
-    if (!target) return;
+    if (!target || ev.detail > 1) return;
     if (target.dataset.close) closeSource(Number(target.dataset.close));
     else if (target.dataset.page !== undefined) showPage(Number(target.dataset.source), Number(target.dataset.page));
     else if (target.dataset.other !== undefined) {
@@ -808,7 +834,7 @@ function wire() {
 
   $('recent-block').addEventListener('click', async (ev) => {
     const target = ev.target.closest('button');
-    if (!target) return;
+    if (!target || ev.detail > 1) return;
     try {
       if (target.dataset.path) await openPaths([target.dataset.path]);
       else if (target.dataset.forget) {
@@ -823,8 +849,14 @@ function wire() {
     }
   });
 
+  // 外側（暗くした部分）で押して離したときだけ閉じる。ダイアログの中で押して外で離したときは閉じない。
+  let pressedOutside = false;
+  $('settings').addEventListener('pointerdown', (ev) => { pressedOutside = ev.target === $('settings'); });
   $('settings').addEventListener('click', (ev) => {
-    if (ev.target === $('settings')) closeSettings();
+    if (ev.target === $('settings')) {
+      if (pressedOutside) closeSettings();
+      return;
+    }
     const sw = ev.target.closest('.switch');
     if (sw && !sw.disabled) toggleIntegration(sw);
   });

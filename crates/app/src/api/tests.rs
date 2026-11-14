@@ -142,6 +142,45 @@ fn open_zip_returns_pages_and_others_and_records_history() {
     assert_eq!(again["results"][0]["source"]["id"], source["id"]);
 }
 
+#[test]
+fn opening_page_of_open_source_selects_it() {
+    let work = Work::new("open-merge");
+    let api = api(&work, FakePlatform::default(), vec![]);
+    let egov = fixture("egov");
+    let path = |name: &str| egov.join(name).to_string_lossy().into_owned();
+
+    // 同じフォルダの XML を 2 つ渡すと、まとまりは 1 つで、後の XML のページを選ぶ。
+    let res = call(&api, "open", json!({ "paths": [path("202601010000000001.xml"), path("henrei.xml")] }));
+    let (first, second) = (&res["results"][0], &res["results"][1]);
+    assert_eq!(first["existing"], false);
+    assert_eq!(second["existing"], true);
+    assert_eq!(second["source"]["id"], first["source"]["id"]);
+    let pages = second["source"]["pages"].as_array().unwrap();
+    let henrei = pages.iter().position(|p| p["file"] == "henrei.xml").unwrap();
+    assert_eq!(second["page"], henrei);
+    // 最初の XML をもう一度開くと、そのページを指す。
+    let again = call(&api, "open", json!({ "paths": [path("202601010000000001.xml")] }));
+    assert_eq!(again["results"][0]["page"], first["source"]["initialPage"]);
+
+    // フォルダを開いた後に、その中の XML を開いても、まとまりは増えない。
+    let api = Api::new(
+        work.0.join("tmp2"),
+        RecentStore::new(work.0.join("recent2.json")),
+        Box::new(FakeTransformer),
+        Box::new(FakePlatform::default()),
+        vec![],
+    );
+    let folder = call(&api, "open", json!({ "paths": [egov.to_string_lossy()] }));
+    let xml = call(&api, "open", json!({ "paths": [path("henrei.xml")] }));
+    assert_eq!(xml["results"][0]["existing"], true);
+    assert_eq!(xml["results"][0]["source"]["id"], folder["results"][0]["source"]["id"]);
+    assert_eq!(xml["results"][0]["page"], henrei);
+    // フォルダそのものをもう一度開いたときは、ページを指さない（画面側で最後に見ていたページに戻す）。
+    let again = call(&api, "open", json!({ "paths": [egov.to_string_lossy()] }));
+    assert_eq!(again["results"][0]["existing"], true);
+    assert_eq!(again["results"][0]["page"], Value::Null);
+}
+
 /// 変換に時間がかかる仮の実装。同じパスを並行して開いたときの確認に使う。
 struct SlowTransformer;
 
