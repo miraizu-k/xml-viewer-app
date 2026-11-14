@@ -108,7 +108,11 @@ fn run_inner() -> Result<(), String> {
             .to_string());
     }
     let paths = AppPaths::detect();
-    let startup_paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    // 相対パスは、起動したときの作業フォルダを基準に絶対パスにする（履歴から開き直せるように）。
+    let startup_paths: Vec<PathBuf> = std::env::args_os()
+        .skip(1)
+        .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)))
+        .collect();
 
     // 前回までの一時フォルダの残りを消す（ほかのウィンドウが使っているものは残る）。
     let temp_root = paths.temp_root.clone();

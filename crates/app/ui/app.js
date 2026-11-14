@@ -67,7 +67,12 @@ function toast(text) {
   $('toast-text').textContent = text;
   $('toast').hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { $('toast').hidden = true; }, 15000);
+  toastTimer = setTimeout(hideToast, 15000);
+}
+
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('toast').hidden = true;
 }
 
 function setBusy(on) {
@@ -184,13 +189,22 @@ async function openPaths(paths) {
   if (messages.length) toast(messages.join('\n'));
 }
 
+/** ファイル選択ダイアログを出しているか。ボタンの連打などで 2 つ目を出さないようにする。 */
+let picking = false;
+
 async function pickAndOpen() {
+  if (picking) return;
+  picking = true;
+  let paths;
   try {
-    const { paths } = await api('pick');
-    await openPaths(paths);
+    paths = (await api('pick')).paths;
   } catch (e) {
     toast(e.message);
+    return;
+  } finally {
+    picking = false;
   }
+  await openPaths(paths);
 }
 
 /** 開いたものを選ぶ。最初に出すページがあれば表示する。 */
@@ -224,8 +238,14 @@ async function closeSource(id) {
   state.sources = state.sources.filter((s) => s.id !== id);
   if (state.current && state.current.source === id) {
     clearView();
-    if (state.sources.length) select(state.sources[0]);
-    else showEmpty();
+    if (state.sources.length) {
+      select(state.sources[0]);
+    } else {
+      // 一覧ごと消えるので、閉じるボタンにあったフォーカスを「ファイルを開く」へ移す。
+      const hadFocus = $('list').contains(document.activeElement);
+      showEmpty();
+      if (hadFocus) $('btn-open-2').focus();
+    }
   } else {
     renderList();
   }
@@ -233,8 +253,28 @@ async function closeSource(id) {
 
 // ---- 一覧 ----
 
+/**
+ * 一覧を描き直す。一覧の中にフォーカスがあれば、描き直した後の同じボタンへ移す。
+ * 同じボタンが無くなったとき（閉じたとき）は、選んでいるページへ移す。
+ */
 function renderList() {
-  $('list').replaceChildren(...state.sources.map(renderSource));
+  const list = $('list');
+  const focused = list.contains(document.activeElement) ? document.activeElement : null;
+  const selector = focused ? listButtonSelector(focused) : null;
+  list.replaceChildren(...state.sources.map(renderSource));
+  if (!focused) return;
+  const target = (selector && list.querySelector(selector)) || list.querySelector('.entry[aria-current="true"]')
+    || list.querySelector('button');
+  if (target) target.focus({ preventScroll: true });
+}
+
+/** 一覧のボタンを、描き直した後に探すためのセレクター。 */
+function listButtonSelector(button) {
+  const d = button.dataset || {};
+  if (d.close) return `[data-close="${d.close}"]`;
+  if (d.page !== undefined) return `[data-source="${d.source}"][data-page="${d.page}"]`;
+  if (d.other !== undefined) return `[data-source="${d.source}"][data-other="${d.other}"]`;
+  return null;
 }
 
 function renderSource(s) {
@@ -319,7 +359,8 @@ async function showPage(sourceId, pageIndex) {
   try {
     data = await api('page', { source: sourceId, page: pageIndex });
   } catch (e) {
-    if (seq === state.showSeq) toast(e.message);
+    // 一覧では選んだ状態になっているので、前の文書を出したままにしない。
+    if (seq === state.showSeq) showMessage('このページは表示できません', [e.message]);
     return;
   }
   if (seq !== state.showSeq) return;
@@ -340,7 +381,12 @@ async function showPage(sourceId, pageIndex) {
   // スクリプトを許さない（allow-scripts を付けない）。allow-same-origin は、親から中身を扱うため。
   frame.setAttribute('sandbox', 'allow-same-origin allow-modals');
   frame.title = data.title;
-  frame.addEventListener('load', () => wireDocument(frame, sourceId, pageIndex));
+  // 文書の中のリンクで移ったときは、次の文書にもフォーカスを渡す（キーでのスクロールを続けられるように）。
+  const frameFocused = document.activeElement && document.activeElement.tagName === 'IFRAME';
+  frame.addEventListener('load', () => {
+    wireDocument(frame, sourceId, pageIndex);
+    if (frameFocused && seq === state.showSeq) frame.contentWindow.focus();
+  });
   frame.src = url;
   $('message').hidden = true;
   $('frame-host').replaceChildren(frame);
@@ -518,23 +564,32 @@ function onKeyDown(ev) {
     ev.preventDefault();
     return;
   }
+  // 設定を開いている間は、後ろの画面の操作（開く・印刷・拡大）をしない。標準の動きは止めておく。
+  const modal = settingsOpen();
+  if (key === 'Escape') {
+    if (modal) {
+      ev.preventDefault();
+      closeSettings();
+    } else if (!$('toast').hidden) {
+      ev.preventDefault();
+      hideToast();
+    }
+    return;
+  }
   const zoom = ctrl && !ev.altKey ? zoomKey(ev) : null;
   if (zoom !== null) {
     ev.preventDefault();
-    if (!state.documentShown) return;
+    if (modal || !state.documentShown) return;
     if (zoom === 0) setZoom(100);
     else zoomStep(zoom);
     return;
   }
   if (ctrl && key === 'p') {
     ev.preventDefault();
-    printPage();
+    if (!modal) printPage();
   } else if (ctrl && key === 'o') {
     ev.preventDefault();
-    pickAndOpen();
-  } else if (key === 'Escape' && !$('settings').hidden) {
-    ev.preventDefault();
-    closeSettings();
+    if (!modal) pickAndOpen();
   }
 }
 
@@ -583,8 +638,18 @@ function applyIntegration(items) {
   $('moved').hidden = !stale;
 }
 
+function settingsOpen() {
+  return !$('settings').hidden;
+}
+
+/** 設定を開いている間は、後ろの画面（ツールバー、一覧、文書）を操作できないようにする。Tab でも移らない。 */
+function setBackgroundInert(on) {
+  for (const node of document.querySelectorAll('.toolbar, .body')) node.inert = on;
+}
+
 async function openSettings() {
   $('settings').hidden = false;
+  setBackgroundInert(true);
   $('settings-close').focus();
   try {
     applyIntegration((await api('integration')).items);
@@ -595,6 +660,7 @@ async function openSettings() {
 
 function closeSettings() {
   $('settings').hidden = true;
+  setBackgroundInert(false);
   $('btn-settings').focus();
 }
 
@@ -628,7 +694,7 @@ window.__xmlv = {
   /** ファイルが置かれた。 */
   drop(paths) {
     $('drop').hidden = true;
-    if (!$('settings').hidden) closeSettings();
+    if (settingsOpen()) closeSettings();
     openPaths(paths);
   },
 };
@@ -647,7 +713,7 @@ function wire() {
   $('btn-settings').addEventListener('click', openSettings);
   $('settings-close').addEventListener('click', closeSettings);
   $('btn-repair').addEventListener('click', repairIntegration);
-  $('toast-close').addEventListener('click', () => { $('toast').hidden = true; });
+  $('toast-close').addEventListener('click', hideToast);
   document.addEventListener('keydown', onKeyDown, true);
 
   $('list').addEventListener('click', (ev) => {
