@@ -193,6 +193,7 @@ body.busy, body.busy * { cursor: progress !important; }
 .primary:hover { background: #33383F; }
 .secondary { height: 30px; padding: 0 12px; border: 1px solid #8C95A0; border-radius: 5px; background: var(--paper); cursor: pointer; flex: none; }
 .secondary:hover { background: var(--chrome); }
+.secondary:disabled { opacity: 0.5; cursor: progress; }
 
 .recent h2 { margin: 4px 0 8px; font-size: 14px; font-weight: 600; }
 .recent ul { margin: 0 0 10px; padding: 0; list-style: none; border-top: 1px solid var(--line); }

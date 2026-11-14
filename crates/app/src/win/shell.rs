@@ -47,6 +47,6 @@ fn describe(code: isize) -> String {
         2 | 3 => "ファイルが見つかりません".to_string(),
         5 => "アクセスが拒否されました".to_string(),
         SE_ERR_NOASSOC | SE_ERR_ASSOCINCOMPLETE => "このファイルを開くアプリが登録されていません".to_string(),
-        _ => format!("開けませんでした（エラー {code}）"),
+        _ => format!("エラー {code}"),
     }
 }

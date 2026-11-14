@@ -286,15 +286,16 @@ impl Api {
 
     fn open_one(&self, path: &Path) -> Value {
         let path_text = path.to_string_lossy();
-        // すでに開いているパスなら、選択を移すだけにする。
-        if let Some(view) = {
-            let state = self.state();
+        let existing = |state: &State| {
             state
                 .sources
                 .iter()
                 .find(|(_, s)| xml_viewer_core::same_path(&s.input, path))
                 .map(|(id, s)| SourceView::new(*id, s))
-        } {
+        };
+        // すでに開いているパスなら、選択を移すだけにする。
+        let found = existing(&self.state());
+        if let Some(view) = found {
             let _ = self.recent.add(path, now_secs());
             return json!({ "path": path_text, "ok": true, "existing": true, "source": view });
         }
@@ -304,6 +305,13 @@ impl Api {
             Ok(source) => {
                 let _ = self.recent.add(path, now_secs());
                 let mut state = self.state();
+                // 同じパスを並行して開いていて（ダブルクリックなど）、先に開き終わった方があれば、そちらを使う。
+                if let Some(view) = existing(&state) {
+                    drop(state);
+                    // 一時フォルダの削除はロックの外で行う（Source を破棄すると消える）。
+                    drop(source);
+                    return json!({ "path": path_text, "ok": true, "existing": true, "source": view });
+                }
                 let id = state.next_id;
                 state.next_id += 1;
                 let view = SourceView::new(id, &source);
