@@ -223,7 +223,7 @@ body.busy, body.busy * { cursor: progress !important; }
 .drop {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 7; /* 設定を開いているときも、置けることが見えるように前に出す */
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, 0.96);
@@ -239,7 +239,7 @@ body.busy, body.busy * { cursor: progress !important; }
   position: absolute;
   left: 50%;
   bottom: 18px;
-  z-index: 4;
+  z-index: 6; /* 設定（.scrim）を開いているときの通知も、前に出して読めるようにする */
   transform: translateX(-50%);
   display: flex;
   align-items: flex-start;
