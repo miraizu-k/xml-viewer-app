@@ -8,7 +8,8 @@ Drop a zip and it lists the pages that have an XSL stylesheet, then shows the se
 
 ## ダウンロード
 
-[Releases](../../releases) から `xml-viewer.exe` をダウンロードします。インストールは要りません。
+[Releases](https://github.com/miraizu-k/xml-viewer-app/releases) から `xml-viewer-v<バージョン>.zip` をダウンロードし、右クリックの「すべて展開」で展開してから、中の `xml-viewer.exe` を起動します。インストールは要りません。
+zip を開いた中から直接起動しないでください。exe が一時フォルダにコピーされて動くため、「設定」でエクスプローラーに登録すると、その一時フォルダを指してしまいます。
 
 - Windows 10 / 11（64 ビット）
 - Microsoft Edge WebView2 ランタイム（Windows 11 と、更新済みの Windows 10 には入っています）
@@ -16,6 +17,9 @@ Drop a zip and it lists the pages that have an XSL stylesheet, then shows the se
 Visual C++ ランタイムは exe に含めているので、別に入れる必要はありません。
 exe に署名をしていないので、初めて起動するときに SmartScreen の警告が出ることがあります。
 「詳細情報」→「実行」で起動できます。
+
+新しい版にするときは、新しい zip の `xml-viewer.exe` で今の exe を置き換えます。設定と最近開いたファイルは残ります。
+使うのをやめるときは、「設定」でエクスプローラーへの登録をすべて切ってから、exe を置いたフォルダごと削除します。
 
 ## 使い方
 
@@ -25,7 +29,7 @@ exe に署名をしていないので、初めて起動するときに SmartScre
 - 文書だけを拡大・縮小できます（ツールバーの − / +、Ctrl + ホイール、Ctrl + + / Ctrl + −、Ctrl + 0 で 100%）。印刷は 100% のままです
 - 印刷は Ctrl + P。PDF は印刷ダイアログの「PDF として保存」で作ります
 - 何も開いていないときの画面に、最近開いたファイルが出ます
-- 「設定」から、エクスプローラーの「送る」・右クリックメニュー・「プログラムから開く」に登録できます。今のユーザーだけの設定で、管理者権限は要りません。切ると登録を消します
+- 「設定」から、エクスプローラーの「送る」・右クリックメニュー・「プログラムから開く」に登録できます。今のユーザーだけの設定で、管理者権限は要りません。切ると登録を消します。exe を別の場所に移したときは、「設定」の「登録し直す」で今の場所に合わせます
 - 「設定」の「ウィンドウを 1 つにまとめる」を入れると、エクスプローラーや exe へのドロップから開いたときに、新しいウィンドウを出さず、開いているウィンドウで開きます
 
 ## プライバシーと安全性
@@ -38,13 +42,14 @@ exe に署名をしていないので、初めて起動するときに SmartScre
 
 ## 不具合の報告
 
-[Issues](../../issues) で受け付けています。
+[Issues](https://github.com/miraizu-k/xml-viewer-app/issues) で受け付けています。
 
 **実物の公文書（氏名・住所・番号などを含むもの）は、添付も貼り付けもしないでください。**
 Issue は誰でも見られます。再現に文書が必要なときは、個人情報を架空のものに置き換えたデータを使ってください。
 
-脆弱性は公開の Issue ではなく、[SECURITY.md](SECURITY.md) の方法で知らせてください。
+脆弱性は公開の Issue ではなく、[SECURITY.md](https://github.com/miraizu-k/xml-viewer-app/blob/main/SECURITY.md) の方法で知らせてください。
 
 ## ライセンス
 
-[MIT](LICENSE)。exe に含まれるサードパーティのソフトウェアのライセンスは、各リリースの `THIRD-PARTY-LICENSES.txt` にまとめています。
+[MIT](https://github.com/miraizu-k/xml-viewer-app/blob/main/LICENSE)。zip には `LICENSE.txt` として入れています。
+exe に含まれるサードパーティのソフトウェアのライセンスは、zip の中の `THIRD-PARTY-LICENSES.txt` にまとめています。
