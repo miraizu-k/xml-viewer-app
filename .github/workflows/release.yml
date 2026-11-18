@@ -37,13 +37,10 @@ jobs:
 
       - run: cargo build --release --locked -p xml-viewer
 
-      - name: 配布物をまとめる
+      # zip（exe、README、ライセンス）と、その SHA-256 を dist に置く。CI でも同じ手順を通している。
+      - name: 配布する zip を作る
         shell: bash
-        run: |
-          mkdir dist
-          cp target/release/xml-viewer.exe dist/
-          (cd dist && sha256sum xml-viewer.exe > xml-viewer.exe.sha256)
-          cargo about generate --workspace --locked --fail about.hbs -o dist/THIRD-PARTY-LICENSES.txt
+        run: bash packaging/package.sh dist
 
       - name: リリースを作る
         shell: bash

@@ -56,8 +56,17 @@ jobs:
 
       - run: cargo build --release --locked -p xml-viewer
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      # リリースと同じ手順で zip を作る。release.yml はタグでしか動かず、v* タグは付け替えられないので、ここで確かめておく。
+      - name: 配布する zip を作る
+        shell: bash
+        run: bash packaging/package.sh dist
+
       - uses: actions/upload-artifact@v7
         with:
           name: xml-viewer-${{ github.sha }}
-          path: target/release/xml-viewer.exe
+          path: dist/
           retention-days: 14
